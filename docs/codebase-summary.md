@@ -54,6 +54,7 @@ deepface:         # Model, detector, threshold settings
 storage:          # Event photo paths, allowed directories
 api:              # Host, port, CORS allowed_origins
 files:            # Upload limits, format whitelist
+person_search:    # Output root for multi-face person search results
 ```
 
 **Loading:** Config auto-loads in `api/main.py` and `cli/commands.py` via `load_config()`.
@@ -68,19 +69,31 @@ Core business logic layer:
 | `search(bytes, limit)` | Query image → match list |
 | `register_event_photos()` | Index directory to PostgreSQL |
 | `build_representations()` | Alias for registration |
+| `search_person_folder()` | Search using multiple reference photos (Multi-Face) |
+| `copy_matches_to_output()` | Copy matched images to person output folder |
 | `_get_db_connection()` | PostgreSQL credentials from config |
+| `_validate_folder_path()` | Validate folder against allowed directories |
+| `_get_images_from_folder()` | Extract image files from folder (limited) |
 
-**Search Flow:**
+**Search Flow (Single Image):**
 1. Preprocess image → Extract face
 2. Validate single face (raise if 0 or >1)
 3. DeepFace.search() with PostgreSQL backend
 4. Convert DataFrame results to SearchMatch objects
 5. Sort by distance, return top-N
 
+**Multi-Face Person Search Flow:**
+1. Validate folder path against allowed directories
+2. Extract person name from folder (underscore → space)
+3. Get up to 50 reference images from folder
+4. Search with each reference, deduplicate by confidence
+5. Return PersonSearchResult with person_name, matches, reference_count
+6. Copy matches to person-specific output folder
+
 **Registration Flow:**
 1. DeepFace.register() scans directory
 2. Extracts faces, computes embeddings
-3. Stores in PostgreSQL with image path
+3. Stores in PostgreSQL with relative path
 4. Count registered images
 
 ### API (`src/api/main.py`)
@@ -107,14 +120,23 @@ FastAPI application with 4 endpoints:
 
 ### CLI (`src/cli/commands.py`)
 
-Click-based command group:
+Click-based command group with auto-detection:
 
 ```bash
 python main.py register [--photos DIR]
 python main.py build [--db-path DIR]
-python main.py search IMAGE_PATH [--limit N] [--db-path DIR]
+python main.py search IMAGE_PATH [--limit N] [--db-path DIR] [--open] [--debug]
 python main.py config
+python main.py clear [--yes]
 ```
+
+**Search Command Auto-Detection:**
+- **File input:** Single-image search (existing behavior)
+- **Folder input:** Multi-face person search (new feature)
+  - Extracts reference images from folder
+  - Searches database for matches
+  - Copies results to person-specific output folder
+  - Auto-opens output folder if `--open` flag used
 
 Each command instantiates FaceService and executes operations.
 
@@ -127,6 +149,13 @@ Each command instantiates FaceService and executes operations.
 **image_utils.py:**
 - `preprocess_image(bytes)` - Resize, normalize
 - `save_temp(PIL.Image)` - Save to temp file for DeepFace
+
+### Data Models (`src/services/face_service.py`)
+
+**Dataclasses:**
+- `SearchMatch`: image_path, distance, confidence, target_x/y/w/h (bounding box)
+- `PersonSearchResult`: person_name, matches[], reference_count, search_errors[]
+- `OutputSummary`: copied_count, output_path, skipped_files[]
 
 ### Schemas (`src/api/schemas.py`)
 
@@ -207,11 +236,13 @@ deepface.threshold: 0.40      # Cosine distance threshold (lower = stricter)
 storage.event_photos          # Default search directory
 files.max_size_mb: 10         # API upload limit
 api.allowed_origins           # CORS whitelist
+person_search.output_root     # Multi-face search output root (default: ./results/person_matches)
 ```
 
 **Environment Variables (overrides config):**
 ```
 DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
+PERSON_SEARCH_OUTPUT          # Override person_search.output_root
 ```
 
 ## Error Handling Strategy
