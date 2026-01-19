@@ -90,6 +90,19 @@ def search(image_path: str, limit: int, db_path: str | None, open_images: bool):
 
 
 @cli.command()
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
+def clear(yes: bool):
+    """Clear all registered images from database."""
+    service = FaceService()
+
+    if not yes:
+        click.confirm("Delete all registered face embeddings?", abort=True)
+
+    count = service.clear_database()
+    click.echo(f"Cleared {count} registered images from database.")
+
+
+@cli.command()
 def config():
     """Show current configuration."""
     from src.utils.config_loader import get_config

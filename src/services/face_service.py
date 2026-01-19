@@ -124,3 +124,37 @@ class FaceService:
     def build_representations(self, photos_dir: str | None = None) -> int:
         """Alias for register_event_photos for CLI compatibility."""
         return self.register_event_photos(photos_dir)
+
+    def clear_database(self) -> int:
+        """Clear all registered face embeddings from PostgreSQL.
+
+        Returns the number of deleted records.
+        """
+        import psycopg2
+
+        conn_details = self._get_db_connection()
+        # DeepFace uses table name based on model: {model_name}_representations
+        table_name = f"{self.model.lower()}_representations"
+
+        conn = psycopg2.connect(
+            host=conn_details["host"],
+            port=conn_details["port"],
+            user=conn_details["user"],
+            password=conn_details["password"],
+            dbname=conn_details["dbname"]
+        )
+        try:
+            with conn.cursor() as cur:
+                # Get count before deletion
+                cur.execute(f"SELECT COUNT(*) FROM {table_name}")
+                count = cur.fetchone()[0]
+
+                # Delete all records
+                cur.execute(f"DELETE FROM {table_name}")
+                conn.commit()
+                return count
+        except psycopg2.errors.UndefinedTable:
+            # Table doesn't exist yet
+            return 0
+        finally:
+            conn.close()
