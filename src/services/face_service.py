@@ -72,6 +72,19 @@ class FaceService:
         self.detector = cfg["deepface"]["detector_backend"]
         self.threshold = cfg["deepface"]["threshold"]
         self.db_path = cfg["storage"]["event_photos"]
+        # Base directory for resolving relative image paths from DB
+        self._photos_base_dir: str | None = None
+
+    def set_photos_base_dir(self, base_dir: str) -> None:
+        """Set base directory for resolving relative image paths."""
+        self._photos_base_dir = str(Path(base_dir).resolve())
+
+    def resolve_image_path(self, relative_path: str) -> str:
+        """Convert relative DB path to absolute path for file operations."""
+        if Path(relative_path).is_absolute():
+            return relative_path  # Already absolute (legacy data)
+        base = self._photos_base_dir or self.db_path
+        return str(Path(base) / relative_path)
 
     def validate_single_face(self, image_path: str) -> dict:
         """Ensure exactly one face in image."""
@@ -147,10 +160,16 @@ class FaceService:
         return debug_service.search_with_debug(query_image, limit, source_path)
 
     def register_event_photos(self, photos_dir: str | None = None) -> int:
-        """Register all event photos to PostgreSQL using DeepFace.register()."""
+        """Register all event photos to PostgreSQL using DeepFace.register().
+
+        Stores relative paths (relative to photos_dir) in the database for portability.
+        """
         target_dir = photos_dir or self.db_path
-        target_path = Path(target_dir)
+        target_path = Path(target_dir).resolve()
         image_extensions = {'.jpg', '.jpeg', '.png', '.heic'}
+
+        # Set base dir for future path resolution
+        self.set_photos_base_dir(str(target_path))
 
         image_files = [
             f for f in target_path.rglob("*")
@@ -161,9 +180,11 @@ class FaceService:
         for img_file in image_files:
             try:
                 full_path = str(img_file.resolve())
+                # Store relative path in DB for portability
+                relative_path = str(img_file.relative_to(target_path))
                 DeepFace.register(
-                    img=full_path,
-                    img_name=full_path,
+                    img=full_path,  # Absolute path for file access
+                    img_name=relative_path,  # Relative path stored in DB
                     model_name=self.model,
                     detector_backend=self.detector,
                     database_type="postgres",

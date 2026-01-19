@@ -16,6 +16,14 @@ class FaceDebugService:
         self.detector = cfg["deepface"]["detector_backend"]
         self.threshold = cfg["deepface"]["threshold"]
         self._db_cfg = cfg.get("database", {})
+        self._photos_base_dir = cfg["storage"]["event_photos"]
+
+    def resolve_image_path(self, relative_path: str) -> str:
+        """Convert relative DB path to absolute path for file operations."""
+        from pathlib import Path
+        if Path(relative_path).is_absolute():
+            return relative_path  # Already absolute (legacy data)
+        return str(Path(self._photos_base_dir) / relative_path)
 
     def _get_db_connection(self) -> dict:
         return {
@@ -109,7 +117,8 @@ class FaceDebugService:
                 print(f"    Total candidates: {len(all_candidates)}")
                 for i, (identity, dist) in enumerate(sorted(all_candidates, key=lambda x: x[1])[:10]):
                     status = "MATCH" if dist <= self.threshold else "REJECT"
-                    print(f"    {i+1}. [{status}] dist={dist:.4f} conf={max(0,1-dist):.2%} - {os.path.basename(identity)}")
+                    # identity is now relative path from DB
+                    print(f"    {i+1}. [{status}] dist={dist:.4f} conf={max(0,1-dist):.2%} - {identity}")
             else:
                 print("    No candidates from DeepFace.search()")
 
@@ -127,13 +136,15 @@ class FaceDebugService:
                 print(f"\n[10] SAVING MATCH DEBUG IMAGES")
                 for i, match in enumerate(sorted_matches):
                     try:
+                        # Resolve relative path to absolute for file access
+                        full_path = self.resolve_image_path(match.image_path)
                         # Find the face that matches the query embedding
                         matching_face = find_matching_face_in_image(
-                            query_embedding, match.image_path, self.model, self.detector
+                            query_embedding, full_path, self.model, self.detector
                         )
                         if matching_face and matching_face.get("facial_area"):
                             debug_path = save_match_debug_image(
-                                match.image_path, [matching_face], match.confidence
+                                full_path, [matching_face], match.confidence
                             )
                             print(f"    {i+1}. {debug_path}")
                         else:
