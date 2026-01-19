@@ -43,7 +43,8 @@ def build(db_path: str | None):
 @click.option("--limit", "-n", default=10, help="Max results")
 @click.option("--db-path", default=None, help="Event photos directory")
 @click.option("--open", "-o", "open_images", is_flag=True, help="Open matched images")
-def search(image_path: str, limit: int, db_path: str | None, open_images: bool):
+@click.option("--debug", "-d", is_flag=True, help="Show debug info for face detection")
+def search(image_path: str, limit: int, db_path: str | None, open_images: bool, debug: bool):
     """Search for matching faces in event photos."""
     import subprocess
     import platform
@@ -54,7 +55,14 @@ def search(image_path: str, limit: int, db_path: str | None, open_images: bool):
 
     try:
         content = Path(image_path).read_bytes()
-        matches = service.search(content, limit=limit)
+
+        if debug:
+            click.echo("=" * 60)
+            click.echo("DEBUG MODE - Face Detection Analysis")
+            click.echo("=" * 60)
+            matches = service.search_with_debug(content, limit=limit, source_path=image_path)
+        else:
+            matches = service.search(content, limit=limit)
 
         if not matches:
             click.echo("No matches found.")
