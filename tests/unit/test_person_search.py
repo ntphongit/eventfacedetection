@@ -134,16 +134,17 @@ class TestCopyMatchesToOutput:
     """Tests for copy_matches_to_output method."""
 
     def test_creates_person_folder(self, tmp_path):
-        """Creates folder named after person."""
+        """Creates folder named after person with folder-prefixed filename."""
         output_root = tmp_path / "output"
-        source_dir = tmp_path / "source"
-        source_dir.mkdir()
+        source_dir = tmp_path / "event_photos" / "MAY_01"
+        source_dir.mkdir(parents=True)
         source_file = source_dir / "photo.jpg"
         source_file.write_bytes(b"image_data")
 
+        # Use relative path like in real DB (folder/filename)
         result = PersonSearchResult(
             person_name="John Doe",
-            matches=[SearchMatch(str(source_file), 0.2, 0.8)],
+            matches=[SearchMatch("MAY_01/photo.jpg", 0.2, 0.8)],
             reference_count=1,
             search_errors=[]
         )
@@ -153,26 +154,32 @@ class TestCopyMatchesToOutput:
             mock_cfg.return_value = {
                 "person_search": {"output_root": str(output_root)}
             }
-            service.resolve_image_path = lambda p: p
+            service.resolve_image_path = lambda p: str(tmp_path / "event_photos" / p)
             output = service.copy_matches_to_output(result)
 
         assert (output_root / "John Doe").exists()
-        assert (output_root / "John Doe" / "photo.jpg").exists()
+        # Filename prefixed with parent folder: MAY_01_photo.jpg
+        assert (output_root / "John Doe" / "MAY_01_photo.jpg").exists()
         assert output.copied_count == 1
 
-    def test_handles_duplicate_filenames(self, tmp_path):
-        """Adds suffix for duplicate filenames."""
+    def test_handles_duplicate_filenames_from_different_folders(self, tmp_path):
+        """Handles same filename from different source folders."""
         output_root = tmp_path / "output"
         person_folder = output_root / "Test Person"
         person_folder.mkdir(parents=True)
-        (person_folder / "photo.jpg").write_bytes(b"existing")
 
-        source = tmp_path / "photo.jpg"
-        source.write_bytes(b"new")
+        # Create two source files with same name in different folders
+        for folder in ["MAY_01", "MAY_02"]:
+            source_dir = tmp_path / "event_photos" / folder
+            source_dir.mkdir(parents=True)
+            (source_dir / "DSC07452.jpg").write_bytes(f"image_{folder}".encode())
 
         result = PersonSearchResult(
             person_name="Test Person",
-            matches=[SearchMatch(str(source), 0.2, 0.8)],
+            matches=[
+                SearchMatch("MAY_01/DSC07452.jpg", 0.2, 0.8),
+                SearchMatch("MAY_02/DSC07452.jpg", 0.25, 0.75),
+            ],
             reference_count=1,
             search_errors=[]
         )
@@ -182,11 +189,13 @@ class TestCopyMatchesToOutput:
             mock_cfg.return_value = {
                 "person_search": {"output_root": str(output_root)}
             }
-            service.resolve_image_path = lambda p: p
+            service.resolve_image_path = lambda p: str(tmp_path / "event_photos" / p)
             output = service.copy_matches_to_output(result)
 
-        assert (person_folder / "photo_1.jpg").exists()
-        assert output.copied_count == 1
+        # Each file prefixed with its source folder
+        assert (person_folder / "MAY_01_DSC07452.jpg").exists()
+        assert (person_folder / "MAY_02_DSC07452.jpg").exists()
+        assert output.copied_count == 2
 
     def test_skips_missing_source_files(self, tmp_path):
         """Records missing files in skipped list."""

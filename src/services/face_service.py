@@ -389,7 +389,16 @@ class FaceService:
                 skipped.append(f"Missing: {match.image_path}")
                 continue
 
-            dest_path = self._get_unique_filename(person_folder, source_path.name)
+            # Prefix filename with parent folder to preserve source info
+            # e.g., MAY_01/DSC07452.jpg → MAY_01_DSC07452.jpg
+            rel_path = Path(match.image_path)
+            if len(rel_path.parts) > 1:
+                prefix = rel_path.parent.name
+                dest_filename = f"{prefix}_{source_path.name}"
+            else:
+                dest_filename = source_path.name
+
+            dest_path = self._get_unique_filename(person_folder, dest_filename)
 
             try:
                 shutil.copy2(source_path, dest_path)
