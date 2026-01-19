@@ -9,7 +9,7 @@ deepface:
   model_name: Facenet512
   detector_backend: retinaface
   distance_metric: cosine
-  threshold: 0.3
+  threshold: 0.38
 
 storage:
   event_photos: ./sukien_13012026/event_photo_13012026
