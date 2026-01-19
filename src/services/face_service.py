@@ -92,22 +92,31 @@ class FaceService:
     def register_event_photos(self, photos_dir: str | None = None) -> int:
         """Register all event photos to PostgreSQL using DeepFace.register()."""
         target_dir = photos_dir or self.db_path
-
-        DeepFace.register(
-            img_path=target_dir,
-            model_name=self.model,
-            detector_backend=self.detector,
-            db_type="postgres",
-            connection_details=self._get_db_connection()
-        )
-
-        # Efficient single-pass file counting
         target_path = Path(target_dir)
         image_extensions = {'.jpg', '.jpeg', '.png', '.heic'}
-        count = sum(
-            1 for f in target_path.rglob("*")
+
+        # Get all image files
+        image_files = [
+            f for f in target_path.rglob("*")
             if f.is_file() and f.suffix.lower() in image_extensions
-        )
+        ]
+
+        count = 0
+        for img_file in image_files:
+            try:
+                DeepFace.register(
+                    img=str(img_file),
+                    img_name=img_file.name,
+                    model_name=self.model,
+                    detector_backend=self.detector,
+                    database_type="postgres",
+                    connection_details=self._get_db_connection(),
+                    enforce_detection=False
+                )
+                count += 1
+            except Exception as e:
+                print(f"Warning: Failed to register {img_file.name}: {e}")
+
         return count
 
     def build_representations(self, photos_dir: str | None = None) -> int:
