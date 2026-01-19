@@ -50,7 +50,7 @@ class FaceService:
             "port": db.get("port", 5432),
             "user": db.get("user", "deepface"),
             "password": db.get("password", "deepface"),
-            "database": db.get("database", "deepface_db")
+            "dbname": db.get("database", "deepface_db")
         }
 
     def search(self, query_image: bytes, limit: int = 10) -> list[SearchMatch]:
@@ -62,15 +62,15 @@ class FaceService:
             self.validate_single_face(str(temp_path))
 
             results = DeepFace.search(
-                img_path=str(temp_path),
+                img=str(temp_path),
                 model_name=self.model,
                 detector_backend=self.detector,
                 distance_metric="cosine",
-                db_type="postgres",
+                database_type="postgres",
                 connection_details=self._get_db_connection(),
-                search_method="ann",
-                threshold=self.threshold,
-                silent=True
+                search_method="exact",
+                k=limit,
+                enforce_detection=False
             )
 
             matches = []
