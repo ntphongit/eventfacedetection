@@ -1,0 +1,115 @@
+"""Face detection and search service using DeepFace."""
+from pathlib import Path
+from dataclasses import dataclass
+from deepface import DeepFace
+
+from src.exceptions import NoFaceDetectedError, MultipleFacesError
+from src.utils.config_loader import get_config
+from src.utils.image_utils import preprocess_image, save_temp
+
+
+@dataclass
+class SearchMatch:
+    """Represents a face search match result."""
+    image_path: str
+    distance: float
+    confidence: float
+
+
+class FaceService:
+    """Thin wrapper around DeepFace API."""
+
+    def __init__(self):
+        cfg = get_config()
+        self.model = cfg["deepface"]["model_name"]
+        self.detector = cfg["deepface"]["detector_backend"]
+        self.threshold = cfg["deepface"]["threshold"]
+        self.db_path = cfg["storage"]["event_photos"]
+
+    def validate_single_face(self, image_path: str) -> dict:
+        """Ensure exactly one face in image."""
+        faces = DeepFace.extract_faces(
+            img_path=image_path,
+            detector_backend=self.detector,
+            enforce_detection=False
+        )
+
+        if len(faces) == 0:
+            raise NoFaceDetectedError()
+        if len(faces) > 1:
+            raise MultipleFacesError(len(faces))
+
+        return faces[0]
+
+    def _get_db_connection(self) -> dict:
+        """Get PostgreSQL connection details from config."""
+        cfg = get_config()
+        db = cfg.get("database", {})
+        return {
+            "host": db.get("host", "localhost"),
+            "port": db.get("port", 5432),
+            "user": db.get("user", "deepface"),
+            "password": db.get("password", "deepface"),
+            "database": db.get("database", "deepface_db")
+        }
+
+    def search(self, query_image: bytes, limit: int = 10) -> list[SearchMatch]:
+        """Search for matching faces using DeepFace.search() with PostgreSQL."""
+        processed = preprocess_image(query_image)
+        temp_path = save_temp(processed)
+
+        try:
+            self.validate_single_face(str(temp_path))
+
+            results = DeepFace.search(
+                img_path=str(temp_path),
+                model_name=self.model,
+                detector_backend=self.detector,
+                distance_metric="cosine",
+                db_type="postgres",
+                connection_details=self._get_db_connection(),
+                search_method="ann",
+                threshold=self.threshold,
+                silent=True
+            )
+
+            matches = []
+            for df in results:
+                if hasattr(df, 'iterrows'):
+                    for _, row in df.head(limit).iterrows():
+                        dist = row.get("distance", 1.0)
+                        matches.append(SearchMatch(
+                            image_path=row.get("identity", row.get("img_name", "")),
+                            distance=dist,
+                            confidence=max(0, 1 - dist)
+                        ))
+
+            return sorted(matches, key=lambda x: x.distance)[:limit]
+
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+    def register_event_photos(self, photos_dir: str | None = None) -> int:
+        """Register all event photos to PostgreSQL using DeepFace.register()."""
+        target_dir = photos_dir or self.db_path
+
+        DeepFace.register(
+            img_path=target_dir,
+            model_name=self.model,
+            detector_backend=self.detector,
+            db_type="postgres",
+            connection_details=self._get_db_connection()
+        )
+
+        # Efficient single-pass file counting
+        target_path = Path(target_dir)
+        image_extensions = {'.jpg', '.jpeg', '.png', '.heic'}
+        count = sum(
+            1 for f in target_path.rglob("*")
+            if f.is_file() and f.suffix.lower() in image_extensions
+        )
+        return count
+
+    def build_representations(self, photos_dir: str | None = None) -> int:
+        """Alias for register_event_photos for CLI compatibility."""
+        return self.register_event_photos(photos_dir)

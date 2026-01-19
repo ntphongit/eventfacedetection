@@ -1,0 +1,29 @@
+database:
+  host: ${DB_HOST:-localhost}
+  port: ${DB_PORT:-5432}
+  user: ${DB_USER:-deepface}
+  password: ${DB_PASSWORD:-deepface}
+  database: ${DB_NAME:-deepface_db}
+
+deepface:
+  model_name: Facenet512
+  detector_backend: retinaface
+  distance_metric: cosine
+  threshold: 0.40
+
+storage:
+  event_photos: ./sukien_13012026/event_photos
+  temp_uploads: ./tmp/uploads
+  allowed_directories:
+    - ./sukien_13012026
+
+api:
+  host: 0.0.0.0
+  port: 8000
+  allowed_origins:
+    - http://localhost:3000
+    - http://localhost:8000
+
+files:
+  max_size_mb: 10
+  allowed_formats: [jpeg, jpg, png, heic]

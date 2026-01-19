@@ -1,0 +1,1 @@
+"""Event Face Detection package."""
