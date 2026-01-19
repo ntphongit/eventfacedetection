@@ -22,6 +22,23 @@ class SearchMatch:
     target_h: int | None = None
 
 
+@dataclass
+class PersonSearchResult:
+    """Result from searching with multiple reference photos of one person."""
+    person_name: str
+    matches: list[SearchMatch]
+    reference_count: int
+    search_errors: list[str]
+
+
+@dataclass
+class OutputSummary:
+    """Summary of copy operation for matched images."""
+    copied_count: int
+    output_path: str
+    skipped_files: list[str]
+
+
 def find_matching_face_in_image(
     query_embedding: list, image_path: str, model_name: str, detector_backend: str
 ) -> dict | None:
@@ -224,3 +241,164 @@ class FaceService:
             return 0
         finally:
             conn.close()
+
+    def _validate_folder_path(self, folder_path: str) -> Path:
+        """Validate folder path against allowed directories.
+
+        Raises:
+            ValueError: If folder path is not under allowed directories
+        """
+        cfg = get_config()
+        allowed_dirs = cfg.get("storage", {}).get("allowed_directories", [])
+
+        folder = Path(folder_path).resolve()
+        for allowed in allowed_dirs:
+            allowed_path = Path(allowed).resolve()
+            try:
+                folder.relative_to(allowed_path)
+                return folder
+            except ValueError:
+                continue
+
+        raise ValueError(
+            f"Folder path not under allowed directories. "
+            f"Allowed: {allowed_dirs}"
+        )
+
+    def _get_images_from_folder(self, folder_path: str, max_refs: int = 50) -> list[Path]:
+        """Get image files from folder (direct children only, limited count).
+
+        Args:
+            folder_path: Path to folder
+            max_refs: Maximum number of reference images to return
+        """
+        folder = Path(folder_path)
+        cfg = get_config()
+        formats = cfg.get("files", {}).get("allowed_formats", ["jpeg", "jpg", "png", "heic"])
+        extensions = {f".{fmt.lower()}" for fmt in formats}
+
+        images = [
+            f for f in folder.iterdir()
+            if f.is_file() and not f.is_symlink() and f.suffix.lower() in extensions
+        ]
+        return images[:max_refs]
+
+    def search_person_folder(
+        self, folder_path: str, limit: int = 50, max_refs: int = 50
+    ) -> PersonSearchResult:
+        """Search using multiple reference photos from folder.
+
+        Args:
+            folder_path: Path to folder with reference photos of ONE person
+            limit: Max results per reference search (clamped 1-1000)
+            max_refs: Max reference images to process (default 50)
+
+        Returns:
+            PersonSearchResult with deduplicated matches (best confidence per image_path)
+
+        Raises:
+            ValueError: If folder path not under allowed directories
+        """
+        # Validate folder path against allowed directories
+        validated_folder = self._validate_folder_path(folder_path)
+
+        # Extract person name from folder path (underscore -> space)
+        person_name = validated_folder.name.replace("_", " ")
+
+        # Clamp limit to reasonable range
+        limit = max(1, min(1000, limit))
+
+        images = self._get_images_from_folder(str(validated_folder), max_refs)
+        if not images:
+            return PersonSearchResult(person_name, [], 0, ["No images found"])
+
+        # Search with each reference, keep best confidence per image_path
+        all_matches: dict[str, SearchMatch] = {}
+        errors: list[str] = []
+
+        for img_path in images:
+            try:
+                content = img_path.read_bytes()
+                matches = self.search(content, limit=limit)
+
+                for m in matches:
+                    if m.image_path not in all_matches:
+                        all_matches[m.image_path] = m
+                    elif m.confidence > all_matches[m.image_path].confidence:
+                        all_matches[m.image_path] = m
+
+            except NoFaceDetectedError:
+                errors.append(f"No face: {img_path.name}")
+            except Exception as e:
+                errors.append(f"{img_path.name}: {e}")
+
+        # Sort by confidence descending
+        sorted_matches = sorted(
+            all_matches.values(),
+            key=lambda x: x.confidence,
+            reverse=True
+        )
+
+        return PersonSearchResult(
+            person_name=person_name,
+            matches=sorted_matches,
+            reference_count=len(images),
+            search_errors=errors
+        )
+
+    def _get_unique_filename(self, dest_dir: Path, filename: str) -> Path:
+        """Get unique filename, adding suffix if exists."""
+        dest = dest_dir / filename
+        if not dest.exists():
+            return dest
+
+        stem = Path(filename).stem
+        suffix = Path(filename).suffix
+        counter = 1
+        while dest.exists():
+            dest = dest_dir / f"{stem}_{counter}{suffix}"
+            counter += 1
+        return dest
+
+    def copy_matches_to_output(self, result: PersonSearchResult) -> OutputSummary:
+        """Copy matched images to person-specific output folder.
+
+        Args:
+            result: PersonSearchResult from search_person_folder
+
+        Returns:
+            OutputSummary with copy statistics
+        """
+        import shutil
+
+        cfg = get_config()
+        output_root = cfg.get("person_search", {}).get(
+            "output_root", "./results/person_matches"
+        )
+
+        person_folder = Path(output_root) / result.person_name
+        person_folder.mkdir(parents=True, exist_ok=True)
+
+        copied = 0
+        skipped: list[str] = []
+
+        for match in result.matches:
+            source_path = Path(self.resolve_image_path(match.image_path))
+
+            if not source_path.exists():
+                skipped.append(f"Missing: {match.image_path}")
+                continue
+
+            dest_path = self._get_unique_filename(person_folder, source_path.name)
+
+            try:
+                shutil.copy2(source_path, dest_path)
+                copied += 1
+            except Exception as e:
+                skipped.append(f"Copy failed {source_path.name}: {e}")
+
+        return OutputSummary(
+            copied_count=copied,
+            output_path=str(person_folder.resolve()),
+            skipped_files=skipped
+        )

@@ -9,10 +9,10 @@ deepface:
   model_name: Facenet512
   detector_backend: retinaface
   distance_metric: cosine
-  threshold: 0.40
+  threshold: 0.3
 
 storage:
-  event_photos: ./sukien_13012026/event_photos
+  event_photos: ./sukien_13012026/event_photo_13012026
   temp_uploads: ./tmp/uploads
   allowed_directories:
     - ./sukien_13012026
@@ -27,3 +27,6 @@ api:
 files:
   max_size_mb: 10
   allowed_formats: [jpeg, jpg, png, heic]
+
+person_search:
+  output_root: ${PERSON_SEARCH_OUTPUT:-./results/person_matches}
