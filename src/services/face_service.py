@@ -104,9 +104,11 @@ class FaceService:
         count = 0
         for img_file in image_files:
             try:
+                # Store full absolute path as img_name for retrieval
+                full_path = str(img_file.resolve())
                 DeepFace.register(
-                    img=str(img_file),
-                    img_name=img_file.name,
+                    img=full_path,
+                    img_name=full_path,
                     model_name=self.model,
                     detector_backend=self.detector,
                     database_type="postgres",

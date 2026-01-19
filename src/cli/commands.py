@@ -42,8 +42,12 @@ def build(db_path: str | None):
 @click.argument("image_path", type=click.Path(exists=True))
 @click.option("--limit", "-n", default=10, help="Max results")
 @click.option("--db-path", default=None, help="Event photos directory")
-def search(image_path: str, limit: int, db_path: str | None):
+@click.option("--open", "-o", "open_images", is_flag=True, help="Open matched images")
+def search(image_path: str, limit: int, db_path: str | None, open_images: bool):
     """Search for matching faces in event photos."""
+    import subprocess
+    import platform
+
     service = FaceService()
     if db_path:
         service.db_path = db_path
@@ -58,9 +62,26 @@ def search(image_path: str, limit: int, db_path: str | None):
 
         click.echo(f"Found {len(matches)} matches:\n")
         for i, m in enumerate(matches, 1):
-            click.echo(f"{i}. {m.image_path}")
+            # Display full path, handle both absolute paths and filenames
+            full_path = m.image_path
+            filename = Path(full_path).name
+            click.echo(f"{i}. {filename}")
+            click.echo(f"   Path: {full_path}")
             click.echo(f"   Confidence: {m.confidence:.2%}")
             click.echo()
+
+        # Open images if requested
+        if open_images and matches:
+            click.echo("Opening matched images...")
+            for m in matches:
+                img_path = m.image_path
+                if Path(img_path).exists():
+                    if platform.system() == "Darwin":
+                        subprocess.run(["open", img_path], check=False)
+                    elif platform.system() == "Windows":
+                        subprocess.run(["start", "", img_path], shell=True, check=False)
+                    else:
+                        subprocess.run(["xdg-open", img_path], check=False)
 
     except NoFaceDetectedError as e:
         click.echo(f"Error: {e}", err=True)

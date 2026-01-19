@@ -34,7 +34,7 @@ python main.py register --photos ./sukien_13012026/event_photos
 
 #### CLI: Search for Matching Faces
 ```bash
-python main.py search ./query_image.jpg --limit 10
+python main.py search "./sukien_13012026/guest_photos/Nguyen_Thanh_Phong/Phong Nguyen.png"
 ```
 
 #### CLI: Pre-build Representations
