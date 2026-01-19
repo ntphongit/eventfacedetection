@@ -133,8 +133,6 @@ class FaceService:
         import psycopg2
 
         conn_details = self._get_db_connection()
-        # DeepFace uses table name based on model: {model_name}_representations
-        table_name = f"{self.model.lower()}_representations"
 
         conn = psycopg2.connect(
             host=conn_details["host"],
@@ -145,12 +143,12 @@ class FaceService:
         )
         try:
             with conn.cursor() as cur:
-                # Get count before deletion
-                cur.execute(f"SELECT COUNT(*) FROM {table_name}")
+                # DeepFace stores embeddings in 'embeddings' table
+                cur.execute("SELECT COUNT(*) FROM embeddings")
                 count = cur.fetchone()[0]
 
-                # Delete all records
-                cur.execute(f"DELETE FROM {table_name}")
+                # Delete all records from embeddings table
+                cur.execute("DELETE FROM embeddings")
                 conn.commit()
                 return count
         except psycopg2.errors.UndefinedTable:
